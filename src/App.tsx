@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { io } from "socket.io-client";
 import { createPublicOrder, fetchOrderStatus, fetchProducts, fetchPublicSettings } from "./api";
 import type { CartItem, Category, OrderSummary, OrderType, PaymentChoice, Product, PublicSettings } from "./types";
 
@@ -55,41 +54,26 @@ export default function App() {
   const [tracking, setTracking] = useState<OrderSummary | null>(null);
 
   useEffect(() => {
-    const init = async () => {
-      try {
-        const [items, appSettings] = await Promise.all([fetchProducts(), fetchPublicSettings()]);
+    Promise.all([fetchProducts(), fetchPublicSettings()])
+      .then(([items, appSettings]) => {
         setProducts(items);
         setSettings(appSettings);
         setTable(appSettings.tableOptions[0] ?? "Takeaway");
-      } catch (err) {
-        console.error("Initialization failed:", err);
-        alert(`Gagal memuat data: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    };
-    init();
+      })
+      .catch((err) => alert(String(err)));
   }, []);
 
   useEffect(() => {
     if (!tracking?.id || terminalOrderStatus.has(tracking.status)) return;
-
-    const apiBase = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:4000/api").trim();
-    const socket = io(apiBase.replace("/api", ""));
-
-    socket.on("connect", () => console.log("[WS] Connected"));
-    socket.on("order:update", (updated: OrderSummary) => {
-      if (updated.id === tracking.id) {
-        setTracking(prev => {
-          if (!prev || updated.updatedAt >= prev.updatedAt) {
-            return updated;
-          }
-          return prev;
-        });
+    const timer = window.setInterval(async () => {
+      try {
+        const status = await fetchOrderStatus(tracking.id);
+        setTracking(status);
+      } catch {
+        // Keep previous status when backend is temporarily unavailable.
       }
-    });
-
-    return () => {
-      socket.disconnect();
-    };
+    }, 5000);
+    return () => window.clearInterval(timer);
   }, [tracking?.id, tracking?.status]);
 
   const filtered = useMemo(() => {
@@ -123,16 +107,9 @@ export default function App() {
     if (!cart.length || sending) return;
     setSending(true);
     try {
-      const idempotencyKey = crypto.randomUUID();
-      const order = await createPublicOrder({
-        table,
-        orderType,
-        customerName,
-        cart,
-        payment,
-        idempotencyKey
-      });
-      setTracking(order);
+      const order = await createPublicOrder({ table, orderType, customerName, cart, payment });
+      const refreshed = await fetchOrderStatus(order.id);
+      setTracking(refreshed);
       setCart([]);
       alert("Pesanan berhasil dikirim. Tunjukkan nomor order saat ambil pesanan.");
     } catch (error) {
@@ -162,8 +139,9 @@ export default function App() {
               {categories.map((item) => (
                 <button
                   key={item}
-                  className={`rounded-lg px-3 py-2 text-sm transition ${item === category ? "bg-cyan-400 text-slate-950" : "bg-slate-800 text-slate-200 hover:bg-slate-700"
-                    }`}
+                  className={`rounded-lg px-3 py-2 text-sm transition ${
+                    item === category ? "bg-cyan-400 text-slate-950" : "bg-slate-800 text-slate-200 hover:bg-slate-700"
+                  }`}
                   onClick={() => setCategory(item)}
                 >
                   {item}

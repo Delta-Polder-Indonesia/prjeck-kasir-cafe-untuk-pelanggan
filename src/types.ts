@@ -43,7 +43,6 @@ export type CreatePublicOrderInput = {
   customerName: string;
   cart: CartItem[];
   payment: PaymentChoice;
-  idempotencyKey?: string;
 };
 
 export type OrderItem = {
